@@ -2,31 +2,37 @@ import express from 'express';
 import http from 'node:http';
 import { Server } from 'socket.io';
 import cors from 'cors';
+import dotenv from 'dotenv';
 import { v4 as uuidv4 } from 'uuid';
+
+dotenv.config();
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server, {
-  cors: {
-    origin: "http://localhost:5173",
-    methods: ["GET", "POST"]
-  }
-});
 
-app.use(cors());
+const corsOptions = {
+  origin: process.env.FRONTEND_URL,
+  methods: ['GET', 'POST'],
+  credentials: true
+};
+
+// Apply CORS to Express
+app.use(cors(corsOptions));
 app.use(express.json());
 
-// Store users and messages in memory (would use a database in production)
+// Apply CORS to Socket.IO
+const io = new Server(server, {
+  cors: corsOptions
+});
+
+// In-memory store (you can replace with DB later)
 const users = {};
 const messages = [];
 
-// Socket.IO connection handler
 io.on('connection', (socket) => {
-  console.log('New client connected:', socket.id);
-  
-  // Handle user login
+  console.log('✅ New client connected:', socket.id);
+
   socket.on('login', ({ username, avatar }) => {
-    // Create a new user object
     const userId = uuidv4();
     const user = {
       id: userId,
@@ -35,20 +41,12 @@ io.on('connection', (socket) => {
       socketId: socket.id,
       online: true
     };
-    
-    // Store user
+
     users[socket.id] = user;
-    
-    // Send the user their own info
     socket.emit('login_success', user);
-    
-    // Send the updated users list to all clients
     io.emit('users_update', Object.values(users));
-    
-    // Send message history to the new user
     socket.emit('message_history', messages);
-    
-    // Broadcast a system message that a new user has joined
+
     const systemMessage = {
       id: uuidv4(),
       senderId: 'system',
@@ -57,17 +55,15 @@ io.on('connection', (socket) => {
       timestamp: new Date().toISOString(),
       type: 'system'
     };
-    
+
     messages.push(systemMessage);
     io.emit('new_message', systemMessage);
   });
-  
-  // Handle new messages
+
   socket.on('send_message', (messageData) => {
     const user = users[socket.id];
-    
     if (!user) return;
-    
+
     const message = {
       id: uuidv4(),
       senderId: user.id,
@@ -77,15 +73,11 @@ io.on('connection', (socket) => {
       timestamp: new Date().toISOString(),
       type: 'user'
     };
-    
-    // Store the message
+
     messages.push(message);
-    
-    // Broadcast the message to all clients
     io.emit('new_message', message);
   });
-  
-  // Handle typing indicator
+
   socket.on('typing', (isTyping) => {
     const user = users[socket.id];
     if (user) {
@@ -96,20 +88,17 @@ io.on('connection', (socket) => {
       });
     }
   });
-  
-  // Handle private messages
+
   socket.on('private_message', ({ recipientId, text }) => {
     const sender = users[socket.id];
-    
     if (!sender) return;
-    
-    // Find the recipient's socket ID
+
     const recipientSocketId = Object.keys(users).find(
       socketId => users[socketId].id === recipientId
     );
-    
+
     if (!recipientSocketId) return;
-    
+
     const privateMessage = {
       id: uuidv4(),
       senderId: sender.id,
@@ -120,24 +109,17 @@ io.on('connection', (socket) => {
       timestamp: new Date().toISOString(),
       type: 'private'
     };
-    
-    // Send the private message to the sender and recipient only
+
     socket.emit('new_private_message', privateMessage);
     io.to(recipientSocketId).emit('new_private_message', privateMessage);
   });
-  
-  // Handle disconnection
+
   socket.on('disconnect', () => {
     const user = users[socket.id];
-    
     if (user) {
-      // Remove the user
       delete users[socket.id];
-      
-      // Send the updated users list to all clients
       io.emit('users_update', Object.values(users));
-      
-      // Broadcast a system message that the user has left
+
       const systemMessage = {
         id: uuidv4(),
         senderId: 'system',
@@ -146,17 +128,17 @@ io.on('connection', (socket) => {
         timestamp: new Date().toISOString(),
         type: 'system'
       };
-      
+
       messages.push(systemMessage);
       io.emit('new_message', systemMessage);
     }
-    
-    console.log('Client disconnected:', socket.id);
+
+    console.log('❌ Client disconnected:', socket.id);
   });
 });
 
-// Start the server
+// Start server
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+  console.log(`🚀 Server running on http://localhost:${PORT}`);
 });
